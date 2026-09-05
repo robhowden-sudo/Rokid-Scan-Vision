@@ -1,6 +1,7 @@
 package com.rokid.scanvision.glasses;
 
-import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -8,6 +9,8 @@ import android.graphics.RectF;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+
+import androidx.activity.ComponentActivity;
 
 import com.rokid.cxr.CXRServiceBridge;
 import com.rokid.cxr.Caps;
@@ -19,10 +22,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
     private static final String CHANNEL = "rokid_scan_vision_state";
     private ScanHudView hud;
     private CXRServiceBridge bridge;
+    private OnDeviceVision vision;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -31,7 +35,18 @@ public class MainActivity extends Activity {
         hud = new ScanHudView();
         setContentView(hud);
         startReceiver();
+        if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) startLocalVision();
+        else requestPermissions(new String[]{Manifest.permission.CAMERA},700);
     }
+
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(requestCode,permissions,results);
+        if(requestCode==700&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)startLocalVision();
+        else if(requestCode==700)hud.setStatus("CAMERA // PERMISSION REQUIRED");
+    }
+
+    private void startLocalVision(){vision=new OnDeviceVision(this,hud::setLocalDetections);vision.start();}
+    void setVisionStatus(String status){hud.setStatus(status);}
 
     private void startReceiver() {
         try {
@@ -89,6 +104,10 @@ public class MainActivity extends Activity {
 
         void setStatus(String s){ post(()->{status=s;invalidate();}); }
 
+        void setLocalDetections(List<Detection> next){
+            post(()->{synchronized(detections){detections.clear();detections.addAll(next);}frames++;status="VISION // ON-GLASSES";invalidate();});
+        }
+
         void apply(JSONObject o){
             if(!"scan_state".equals(o.optString("type"))) return;
             List<Detection> next=new ArrayList<>();
@@ -109,7 +128,7 @@ public class MainActivity extends Activity {
             super.onDraw(c);
             float w=getWidth(),h=getHeight(),cx=w/2f,cy=h/2f;
             text.setTextSize(Math.max(14f,w*.035f)); text.setTextAlign(Paint.Align.LEFT);
-            c.drawText("SCAN.VISION // 0.2",16,30,text);
+            c.drawText("SCAN.VISION // 0.3 LOCAL",16,30,text);
             text.setTextAlign(Paint.Align.RIGHT); c.drawText(status,w-16,30,text);
 
             // central targeting reticle
@@ -145,5 +164,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    private static class Detection { String label; float conf,l,t,r,b; }
+    @Override protected void onDestroy(){if(vision!=null)vision.close();super.onDestroy();}
+
+    static class Detection { String label; float conf,l,t,r,b; }
 }
