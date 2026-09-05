@@ -122,7 +122,7 @@ public class MainActivity extends ComponentActivity {
             @Override public void onImageError(int code,String message){
                 glassesPhotoPending=false;
                 setStatus("GLASSES CAMERA ERROR // "+code);
-                requestNextGlassesPhoto();
+                requestNextGlassesPhoto(1000L);
             }
         });
         link.setCXRLinkCbk(new ICXRLinkCbk(){
@@ -151,8 +151,8 @@ public class MainActivity extends ComponentActivity {
             @Override public void onUnInstallAppResult(boolean success){}
             @Override public void onStopAppResult(boolean success){}
             @Override public void onQueryAppResult(boolean installed){}
-            @Override public void onOpenAppResult(boolean success){appStartRequested=success;if(success){sessionReady=true;setStatus("GLASSES HUD // STARTED");if(glassesVisionRunning)requestGlassesPhoto();}else setStatus("GLASSES HUD // LAUNCH FAILED");}
-            @Override public void onGlassAppResume(boolean resumed){if(resumed){sessionReady=true;setStatus("GLASSES HUD // RESUMED");if(glassesVisionRunning)requestGlassesPhoto();}}
+            @Override public void onOpenAppResult(boolean success){appStartRequested=success;if(success)setStatus("GLASSES HUD // OPEN // WAITING FOR MEDIA SESSION");else setStatus("GLASSES HUD // LAUNCH FAILED");}
+            @Override public void onGlassAppResume(boolean resumed){if(resumed)setStatus("GLASSES HUD // RESUMED // WAITING FOR MEDIA SESSION");}
         });
     }
 
@@ -161,14 +161,18 @@ public class MainActivity extends ComponentActivity {
         if(!sessionReady){setStatus("GLASSES CAMERA // WAITING FOR SESSION");return;}
         try{
             glassesPhotoPending=true;
-            boolean accepted=link.takePhoto(640,480,75);
-            if(!accepted){glassesPhotoPending=false;setStatus("GLASSES CAMERA // REQUEST REJECTED");requestNextGlassesPhoto();}
+            boolean accepted=link.takePhoto(1024,768,80);
+            if(!accepted){glassesPhotoPending=false;setStatus("GLASSES CAMERA // REQUEST REJECTED // "+link.getCXRSessionState());requestNextGlassesPhoto(1000L);}
             else setStatus("GLASSES CAMERA // SCANNING");
-        }catch(Throwable t){glassesPhotoPending=false;setStatus("GLASSES CAMERA // "+t.getClass().getSimpleName());requestNextGlassesPhoto();}
+        }catch(Throwable t){glassesPhotoPending=false;setStatus("GLASSES CAMERA // "+t.getClass().getSimpleName());requestNextGlassesPhoto(1000L);}
     }
 
     private void requestNextGlassesPhoto(){
-        if(status!=null)status.postDelayed(this::requestGlassesPhoto,180L);
+        requestNextGlassesPhoto(180L);
+    }
+
+    private void requestNextGlassesPhoto(long delayMs){
+        if(status!=null)status.postDelayed(this::requestGlassesPhoto,delayMs);
     }
 
     private void sendTestPacket(){

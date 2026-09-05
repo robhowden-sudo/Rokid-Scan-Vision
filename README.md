@@ -19,7 +19,7 @@ A green monochrome computer-vision HUD experiment for Rokid glasses, using the p
 
 `Rokid camera / vision source -> phone processing -> compact detection packet -> CXR -> glasses HUD`
 
-The v0.1 milestone validated the HUD, connection and packet protocol. v0.2 captures the wearer's view from the camera built into the Rokid glasses, performs inference on the phone, and returns only lightweight detection data to the HUD. Rokid exposes callback-driven photo capture rather than a continuous video stream, so the app repeatedly requests the next frame after processing completes.
+The v0.1 milestone validated the HUD, connection and packet protocol. v0.2 captures the wearer's view from the camera built into the Rokid glasses at 1024x768, performs inference on the phone, and returns only lightweight detection data to the HUD. Rokid exposes callback-driven photo capture rather than a continuous video stream, so the app waits for the confirmed CXR session and requests the next frame only after processing completes.
 
 ## Modules
 
