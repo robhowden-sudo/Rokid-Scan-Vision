@@ -24,7 +24,8 @@ import java.util.Locale;
 
 public class MainActivity extends ComponentActivity {
     private static final String CHANNEL = "rokid_scan_vision_state";
-    private static final float TARGET_VERTICAL_OFFSET=-.20f;
+    private static final float TARGET_HORIZONTAL_OFFSET=.05f;
+    private static final float TARGET_VERTICAL_OFFSET=-.15f;
     private ScanHudView hud;
     private CXRServiceBridge bridge;
     private OnDeviceVision vision;
@@ -164,7 +165,7 @@ public class MainActivity extends ComponentActivity {
             }
             for(int i=0;i<copy.size();i++){
                 Detection d=copy.get(i);
-                float targetX=((d.l+d.r)*.5f)*w;
+                float targetX=Math.max(0f,Math.min(1f,(d.l+d.r)*.5f+TARGET_HORIZONTAL_OFFSET))*w;
                 float targetY=Math.max(0f,Math.min(1f,(d.t+d.b)*.5f+TARGET_VERTICAL_OFFSET))*h;
                 float objectWidth=Math.max(0f,(d.r-d.l)*w);
                 float objectHeight=Math.max(0f,(d.b-d.t)*h);
