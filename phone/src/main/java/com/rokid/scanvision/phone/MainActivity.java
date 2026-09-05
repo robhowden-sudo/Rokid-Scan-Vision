@@ -59,7 +59,7 @@ public class MainActivity extends ComponentActivity {
         int green=Color.rgb(79,255,159),soft=Color.rgb(174,244,202);
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(36,60,36,36); root.setBackgroundColor(Color.BLACK);
         TextView title=txt("ROKID // SCAN VISION",26,green); title.setGravity(Gravity.CENTER); root.addView(title);
-        TextView version=txt("VISION HUD  v0.2.2",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
+        TextView version=txt("VISION HUD  v0.2.3",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
         status=txt("PHONE READY // GLASSES DISCONNECTED",16,green); status.setPadding(0,0,0,24); root.addView(status);
         Button connect=new Button(this); connect.setText("CONNECT THROUGH HI ROKID"); connect.setOnClickListener(v->authorize()); root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
         Button test=new Button(this); test.setText("SEND TEST TARGETS"); test.setOnClickListener(v->worker.execute(this::sendTestPacket)); root.addView(test,new LinearLayout.LayoutParams(-1,-2));
@@ -129,6 +129,13 @@ public class MainActivity extends ComponentActivity {
     }
 
     private void configureLink(){
+        CxrDefs.CXRSession session=new CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP,"com.rokid.scanvision.glasses");
+        link.configCXRSession(session,new ICXRSessionCbk(){
+            @Override public void onSessionAvailable(CxrDefs.CXRSessionReason reason){startGlassesApp();}
+            @Override public void onSessionStart(CxrDefs.CXRSessionReason reason){sessionReady=true;connected=true;setStatus("SCAN VISION // LINK READY");if(glassesVisionRunning)requestGlassesPhoto();}
+            @Override public void onSessionPause(CxrDefs.CXRSessionReason reason){sessionReady=false;glassesPhotoPending=false;setStatus("SCAN VISION // SESSION PAUSED");}
+            @Override public void onSessionUnavailable(CxrDefs.CXRSessionReason reason){sessionReady=false;appStartRequested=false;glassesPhotoPending=false;setStatus("SCAN VISION // SESSION UNAVAILABLE");}
+        });
         link.setCXRCustomCmdCbk(new ICustomCmdCbk(){@Override public void onCustomCmdResult(String c,byte[] d){}});
         link.setCXRImageCbk(new IImageStreamCbk(){
             @Override public void onImageReceived(byte[] data){
@@ -153,13 +160,6 @@ public class MainActivity extends ComponentActivity {
             @Override public void onGlassAiAssistStop(){}
             @Override public void onGlassAiInterrupt(boolean interrupted){}
             @Override public void onGlassLauncherResume(){}
-        });
-        CxrDefs.CXRSession session=new CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP,"com.rokid.scanvision.glasses");
-        link.configCXRSession(session,new ICXRSessionCbk(){
-            @Override public void onSessionAvailable(CxrDefs.CXRSessionReason reason){startGlassesApp();}
-            @Override public void onSessionStart(CxrDefs.CXRSessionReason reason){sessionReady=true;connected=true;setStatus("SCAN VISION // LINK READY");if(glassesVisionRunning)requestGlassesPhoto();}
-            @Override public void onSessionPause(CxrDefs.CXRSessionReason reason){sessionReady=false;glassesPhotoPending=false;setStatus("SCAN VISION // SESSION PAUSED");}
-            @Override public void onSessionUnavailable(CxrDefs.CXRSessionReason reason){sessionReady=false;appStartRequested=false;glassesPhotoPending=false;setStatus("SCAN VISION // SESSION UNAVAILABLE");}
         });
     }
 
