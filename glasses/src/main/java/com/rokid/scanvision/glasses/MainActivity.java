@@ -128,22 +128,14 @@ public class MainActivity extends ComponentActivity {
         @Override protected void onDraw(Canvas c){
             super.onDraw(c);
             float w=getWidth(),h=getHeight(),cx=w/2f,cy=h/2f;
+            float headerBottom=40f,telemetryBottom=124f,targetListTop=142f;
             long tick=SystemClock.uptimeMillis()/90L;
             float glitch=(tick%41==0)?6f:((tick%23==0)?-3f:0f);
-            text.setTextSize(Math.max(10f,w*.026f)); text.setTextAlign(Paint.Align.LEFT);
-            c.drawText("CYBERDYNE SYSTEMS // LOCAL OPTICAL CORE",16+glitch,30,text);
-            text.setTextAlign(Paint.Align.RIGHT); c.drawText(status,w-16,30,text);
+            drawHeader(c,w,glitch);
 
             drawRails(c,w,h,tick);
             drawBearing(c,w*.14f,h*.48f,Math.min(w,h)*.085f,tick);
             drawCompass(c,w*.86f,h*.48f,Math.min(w,h)*.085f,tick);
-
-            text.setTextSize(Math.max(9f,w*.022f)); text.setTextAlign(Paint.Align.LEFT);
-            String[] left={"MODE  // AUTONOMOUS","CPU   // NEURAL NET","OPTIC // CXR-S CAM","RANGE // CALCULATING","TRACK // MULTI TARGET","MEM   // "+hex(tick*7919)};
-            for(int i=0;i<left.length;i++)c.drawText(left[i],16+((tick+i)%47==0?4:0),62+i*18,text);
-            text.setTextAlign(Paint.Align.RIGHT);
-            String[] right={"SYS 120.7","KERNEL ONLINE","MOTION VECTOR","DEPTH ESTIMATE","ID "+hex(tick*3571),"T+"+String.format(Locale.US,"%06d",tick)};
-            for(int i=0;i<right.length;i++)c.drawText(right[i],w-16,62+i*18,text);
 
             // central targeting reticle
             float r=Math.min(w,h)*.075f;
@@ -158,15 +150,15 @@ public class MainActivity extends ComponentActivity {
             for(int i=1;i<=3;i++) c.drawLine(24,scanY-i*5,w-24,scanY-i*5,dim);
 
             List<Detection> copy; synchronized(detections){copy=new ArrayList<>(detections);}
-            drawAssessment(c,w,copy,tick);
+            drawAssessment(c,w,copy,tick,headerBottom,telemetryBottom);
             drawCodeBank(c,w,h,tick);
             text.setTextAlign(Paint.Align.LEFT);text.setTextSize(Math.max(10f,w*.024f));
-            c.drawText("DETECTED TARGETS",16,190,text);
-            c.drawLine(16,196,Math.min(w*.42f,250),196,dim);
-            if(copy.isEmpty())c.drawText("-- ACQUIRING --",16,216,text);
+            c.drawText("DETECTED TARGETS",16,targetListTop,text);
+            c.drawLine(16,targetListTop+6,Math.min(w*.42f,250),targetListTop+6,dim);
+            if(copy.isEmpty())c.drawText("-- ACQUIRING --",16,targetListTop+26,text);
             for(int i=0;i<Math.min(4,copy.size());i++){
                 Detection d=copy.get(i);
-                c.drawText(String.format(Locale.US,"%02d  %-14s %3d%%",i+1,d.label,Math.round(d.conf*100f)),16,216+i*19,text);
+                c.drawText(String.format(Locale.US,"%02d  %-14s %3d%%",i+1,d.label,Math.round(d.conf*100f)),16,targetListTop+26+i*19,text);
             }
             for(Detection d:copy){
                 float l=d.l*w,t=d.t*h,rr=d.r*w,b=d.b*h;
@@ -179,7 +171,8 @@ public class MainActivity extends ComponentActivity {
                 c.drawLine(rr,b,rr-corner,b,line); c.drawLine(rr,b,rr,b-corner,line);
                 text.setTextAlign(Paint.Align.LEFT); text.setTextSize(Math.max(13f,w*.032f));
                 String label=d.label+" // "+Math.round(d.conf*100f)+"%";
-                c.drawText(label,l,Math.max(48,t-7),text);
+                float labelY=t>telemetryBottom+24?t-7:telemetryBottom+22;
+                c.drawText(label,l,labelY,text);
                 text.setTextSize(Math.max(9f,w*.022f));
                 c.drawText("TGT-"+hex((long)(d.l*99991+d.t*7717)),l,Math.min(h-52,b+15),text);
                 c.drawLine(l+(rr-l)*.25f,t,l+(rr-l)*.75f,b,dim);
@@ -193,6 +186,21 @@ public class MainActivity extends ComponentActivity {
                 text.setTextSize(Math.max(12f,w*.03f));
                 c.drawText("// VISUAL BUFFER RESYNC //",cx+glitch,cy-r*2.1f,text);
             }
+        }
+
+        private void drawHeader(Canvas c,float w,float glitch){
+            text.setTextSize(Math.max(9f,w*.016f));
+            int save=c.save();
+            c.clipRect(16,0,w*.64f,40);
+            text.setTextAlign(Paint.Align.LEFT);
+            c.drawText("CYBERDYNE SYSTEMS // LOCAL OPTICAL CORE",16+glitch,27,text);
+            c.restoreToCount(save);
+            save=c.save();
+            c.clipRect(w*.65f,0,w-16,40);
+            text.setTextAlign(Paint.Align.RIGHT);
+            c.drawText(status,w-16,27,text);
+            c.restoreToCount(save);
+            c.drawLine(16,36,w-16,36,dim);
         }
 
         private void drawRails(Canvas c,float w,float h,long tick){
@@ -220,13 +228,21 @@ public class MainActivity extends ComponentActivity {
             float a=(tick%360)*(float)Math.PI/180f;c.drawLine(x,y,x+(float)Math.sin(a)*r,y-(float)Math.cos(a)*r,line);
         }
 
-        private void drawAssessment(Canvas c,float w,List<Detection> copy,long tick){
-            text.setTextAlign(Paint.Align.LEFT);text.setTextSize(Math.max(8f,w*.018f));
-            c.drawText("// VISUAL ASSESSMENT",34,54,text);
+        private void drawAssessment(Canvas c,float w,List<Detection> copy,long tick,float top,float bottom){
+            text.setTextSize(Math.max(7f,w*.014f));
+            int save=c.save();
+            c.clipRect(28,top,w*.48f,bottom);
+            text.setTextAlign(Paint.Align.LEFT);
+            c.drawText("// VISUAL ASSESSMENT",34,top+14,text);
             String[] keys={"SCAN","LEVEL","IMAGE","TRACK","MASK"};
-            for(int i=0;i<keys.length;i++)c.drawText(String.format(Locale.US,"%-6s %04X %04X",keys[i],(tick*31+i*977)&0xFFFF,(tick*17+i*313)&0xFFFF),34,68+i*12,text);
-            text.setTextAlign(Paint.Align.RIGHT);c.drawText("OBJECT CLASS BANK",w-34,54,text);
-            for(int i=0;i<Math.min(6,copy.size());i++)c.drawText(String.format(Locale.US,"%02d %-10s %03d",i+1,copy.get(i).label,Math.round(copy.get(i).conf*100)),w-34,68+i*12,text);
+            for(int i=0;i<keys.length;i++)c.drawText(String.format(Locale.US,"%-6s %04X %04X",keys[i],(tick*31+i*977)&0xFFFF,(tick*17+i*313)&0xFFFF),34,top+28+i*12,text);
+            c.restoreToCount(save);
+            save=c.save();
+            c.clipRect(w*.52f,top,w-28,bottom);
+            text.setTextAlign(Paint.Align.RIGHT);c.drawText("OBJECT CLASS BANK",w-34,top+14,text);
+            if(copy.isEmpty())c.drawText("00 NO CLASSIFICATION",w-34,top+28,text);
+            for(int i=0;i<Math.min(5,copy.size());i++)c.drawText(String.format(Locale.US,"%02d %-10s %03d",i+1,copy.get(i).label,Math.round(copy.get(i).conf*100)),w-34,top+28+i*12,text);
+            c.restoreToCount(save);
         }
 
         private void drawCodeBank(Canvas c,float w,float h,long tick){
