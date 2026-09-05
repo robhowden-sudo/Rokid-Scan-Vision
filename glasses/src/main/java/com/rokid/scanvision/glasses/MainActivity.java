@@ -5,7 +5,6 @@ import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.RectF;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.view.View;
@@ -154,28 +153,37 @@ public class MainActivity extends ComponentActivity {
             drawCodeBank(c,w,h,tick);
             text.setTextAlign(Paint.Align.LEFT);text.setTextSize(Math.max(10f,w*.024f));
             c.drawText("DETECTED TARGETS",16,targetListTop,text);
-            c.drawLine(16,targetListTop+6,Math.min(w*.42f,250),targetListTop+6,dim);
+            c.drawLine(16,targetListTop+6,Math.min(w*.56f,360),targetListTop+6,dim);
             if(copy.isEmpty())c.drawText("-- ACQUIRING --",16,targetListTop+26,text);
-            for(int i=0;i<Math.min(4,copy.size());i++){
+            for(int i=0;i<Math.min(6,copy.size());i++){
                 Detection d=copy.get(i);
-                c.drawText(String.format(Locale.US,"%02d  %-14s %3d%%",i+1,d.label,Math.round(d.conf*100f)),16,targetListTop+26+i*19,text);
+                float listX=i<3?16:w*.29f;
+                float listY=targetListTop+26+(i%3)*19;
+                c.drawText(String.format(Locale.US,"%02d  %-11s %3d%%",i+1,d.label,Math.round(d.conf*100f)),listX,listY,text);
             }
-            for(Detection d:copy){
-                float l=d.l*w,t=d.t*h,rr=d.r*w,b=d.b*h;
-                RectF box=new RectF(l,t,rr,b);
-                c.drawRect(box,dim);
-                float corner=Math.min(18f,(rr-l)*.18f);
-                c.drawLine(l,t,l+corner,t,line); c.drawLine(l,t,l,t+corner,line);
-                c.drawLine(rr,t,rr-corner,t,line); c.drawLine(rr,t,rr,t+corner,line);
-                c.drawLine(l,b,l+corner,b,line); c.drawLine(l,b,l,b-corner,line);
-                c.drawLine(rr,b,rr-corner,b,line); c.drawLine(rr,b,rr,b-corner,line);
-                text.setTextAlign(Paint.Align.LEFT); text.setTextSize(Math.max(13f,w*.032f));
-                String label=d.label+" // "+Math.round(d.conf*100f)+"%";
-                float labelY=t>telemetryBottom+24?t-7:telemetryBottom+22;
-                c.drawText(label,l,labelY,text);
-                text.setTextSize(Math.max(9f,w*.022f));
-                c.drawText("TGT-"+hex((long)(d.l*99991+d.t*7717)),l,Math.min(h-52,b+15),text);
-                c.drawLine(l+(rr-l)*.25f,t,l+(rr-l)*.75f,b,dim);
+            for(int i=0;i<copy.size();i++){
+                Detection d=copy.get(i);
+                float targetX=((d.l+d.r)*.5f)*w;
+                float targetY=((d.t+d.b)*.5f)*h;
+                float objectWidth=Math.max(0f,(d.r-d.l)*w);
+                float objectHeight=Math.max(0f,(d.b-d.t)*h);
+                float targetRadius=Math.max(12f,Math.min(25f,Math.min(objectWidth,objectHeight)*.22f));
+
+                // The detector's bounding box is used only to locate the object. The HUD
+                // deliberately exposes no box: each object gets a numbered circular marker
+                // matching its entry in DETECTED TARGETS.
+                c.drawCircle(targetX,targetY,targetRadius,line);
+                c.drawCircle(targetX,targetY,targetRadius+4f,dim);
+                c.drawLine(targetX-targetRadius-7f,targetY,targetX-targetRadius+3f,targetY,line);
+                c.drawLine(targetX+targetRadius-3f,targetY,targetX+targetRadius+7f,targetY,line);
+                c.drawLine(targetX,targetY-targetRadius-7f,targetX,targetY-targetRadius+3f,line);
+                c.drawLine(targetX,targetY+targetRadius-3f,targetX,targetY+targetRadius+7f,line);
+
+                text.setTextAlign(Paint.Align.CENTER);
+                text.setTextSize(Math.max(12f,w*.029f));
+                Paint.FontMetrics fm=text.getFontMetrics();
+                float numberBaseline=targetY-(fm.ascent+fm.descent)*.5f;
+                c.drawText(String.format(Locale.US,"%02d",i+1),targetX,numberBaseline,text);
             }
 
             text.setTextSize(Math.max(13f,w*.032f)); text.setTextAlign(Paint.Align.LEFT);
