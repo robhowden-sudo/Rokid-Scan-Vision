@@ -154,6 +154,14 @@ public class MainActivity extends ComponentActivity {
             for(int i=1;i<=3;i++) c.drawLine(24,scanY-i*5,w-24,scanY-i*5,dim);
 
             List<Detection> copy; synchronized(detections){copy=new ArrayList<>(detections);}
+            text.setTextAlign(Paint.Align.LEFT);text.setTextSize(Math.max(10f,w*.024f));
+            c.drawText("DETECTED TARGETS",16,190,text);
+            c.drawLine(16,196,Math.min(w*.42f,250),196,dim);
+            if(copy.isEmpty())c.drawText("-- ACQUIRING --",16,216,text);
+            for(int i=0;i<Math.min(4,copy.size());i++){
+                Detection d=copy.get(i);
+                c.drawText(String.format(Locale.US,"%02d  %-14s %3d%%",i+1,d.label,Math.round(d.conf*100f)),16,216+i*19,text);
+            }
             for(Detection d:copy){
                 float l=d.l*w,t=d.t*h,rr=d.r*w,b=d.b*h;
                 RectF box=new RectF(l,t,rr,b);

@@ -1,22 +1,22 @@
 package com.rokid.scanvision.glasses;
 
-import android.annotation.SuppressLint;
-import android.graphics.Rect;
-import android.media.Image;
+import android.graphics.Bitmap;
+import android.graphics.RectF;
+import android.os.SystemClock;
 import android.util.Size;
-
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
-
-import com.google.mlkit.vision.common.InputImage;
-import com.google.mlkit.vision.objects.DetectedObject;
-import com.google.mlkit.vision.objects.ObjectDetection;
-import com.google.mlkit.vision.objects.ObjectDetector;
-import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions;
-
+import com.google.mediapipe.framework.image.BitmapImageBuilder;
+import com.google.mediapipe.framework.image.MPImage;
+import com.google.mediapipe.tasks.components.containers.Category;
+import com.google.mediapipe.tasks.components.containers.Detection;
+import com.google.mediapipe.tasks.core.BaseOptions;
+import com.google.mediapipe.tasks.vision.core.ImageProcessingOptions;
+import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetector;
+import com.google.mediapipe.tasks.vision.objectdetector.ObjectDetectorResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -26,60 +26,70 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 final class OnDeviceVision implements AutoCloseable {
     interface Sink { void accept(List<MainActivity.Detection> detections); }
-
+    private static final long INFERENCE_INTERVAL_MS=250L;
     private final MainActivity activity;
     private final Sink sink;
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
     private final AtomicBoolean processing=new AtomicBoolean(false);
-    private final ObjectDetector detector=ObjectDetection.getClient(new ObjectDetectorOptions.Builder()
-            .setDetectorMode(ObjectDetectorOptions.STREAM_MODE).enableClassification().build());
+    private ObjectDetector detector;
     private ProcessCameraProvider provider;
+    private long lastInferenceMs=0L;
 
     OnDeviceVision(MainActivity activity,Sink sink){this.activity=activity;this.sink=sink;}
 
     void start(){
+        try{
+            BaseOptions base=BaseOptions.builder().setModelAssetPath("efficientdet_lite0.tflite").build();
+            ObjectDetector.ObjectDetectorOptions options=ObjectDetector.ObjectDetectorOptions.builder()
+                    .setBaseOptions(base).setMaxResults(6).setScoreThreshold(.38f).build();
+            detector=ObjectDetector.createFromOptions(activity,options);
+        }catch(RuntimeException e){activity.setVisionStatus("MODEL // "+e.getClass().getSimpleName());return;}
         ProcessCameraProvider.getInstance(activity).addListener(()->{
             try{
                 provider=ProcessCameraProvider.getInstance(activity).get();
                 ImageAnalysis analysis=new ImageAnalysis.Builder().setTargetResolution(new Size(640,480))
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build();
                 analysis.setAnalyzer(executor,this::analyze);
                 provider.unbindAll();
                 provider.bindToLifecycle(activity,CameraSelector.DEFAULT_BACK_CAMERA,analysis);
-                activity.setVisionStatus("VISION // LOCAL CAMERA ACTIVE");
+                activity.setVisionStatus("VISION // 80-CLASS LOCAL");
             }catch(Exception e){activity.setVisionStatus("CAMERA // "+e.getClass().getSimpleName());}
         },ContextCompat.getMainExecutor(activity));
     }
 
-    @SuppressLint("UnsafeOptInUsageError") private void analyze(ImageProxy proxy){
-        Image image=proxy.getImage();
-        if(image==null||!processing.compareAndSet(false,true)){proxy.close();return;}
-        int rotation=proxy.getImageInfo().getRotationDegrees();
-        int width=(rotation==90||rotation==270)?proxy.getHeight():proxy.getWidth();
-        int height=(rotation==90||rotation==270)?proxy.getWidth():proxy.getHeight();
-        detector.process(InputImage.fromMediaImage(image,rotation))
-                .addOnSuccessListener(objects->publish(objects,width,height))
-                .addOnFailureListener(e->activity.setVisionStatus("VISION // "+e.getClass().getSimpleName()))
-                .addOnCompleteListener(t->{processing.set(false);proxy.close();});
+    private void analyze(ImageProxy proxy){
+        long now=SystemClock.uptimeMillis();
+        if(detector==null||now-lastInferenceMs<INFERENCE_INTERVAL_MS||!processing.compareAndSet(false,true)){proxy.close();return;}
+        lastInferenceMs=now;
+        try{
+            Bitmap bitmap=Bitmap.createBitmap(proxy.getWidth(),proxy.getHeight(),Bitmap.Config.ARGB_8888);
+            bitmap.copyPixelsFromBuffer(proxy.getPlanes()[0].getBuffer());
+            int rotation=proxy.getImageInfo().getRotationDegrees();
+            MPImage image=new BitmapImageBuilder(bitmap).build();
+            ImageProcessingOptions imageOptions=ImageProcessingOptions.builder().setRotationDegrees(rotation).build();
+            ObjectDetectorResult result=detector.detect(image,imageOptions);
+            publish(result,bitmap.getWidth(),bitmap.getHeight());
+            image.close();
+        }catch(RuntimeException e){activity.setVisionStatus("VISION // "+e.getClass().getSimpleName());}
+        finally{proxy.close();processing.set(false);}
     }
 
-    private void publish(List<DetectedObject> objects,int width,int height){
+    private void publish(ObjectDetectorResult result,int width,int height){
         List<MainActivity.Detection> out=new ArrayList<>();
-        for(DetectedObject object:objects){
-            Rect b=object.getBoundingBox();
+        for(Detection detection:result.detections()){
+            if(detection.categories().isEmpty())continue;
+            Category category=detection.categories().get(0);
+            RectF b=detection.boundingBox();
             MainActivity.Detection d=new MainActivity.Detection();
-            d.label="OBJECT"; d.conf=1f;
-            if(!object.getLabels().isEmpty()){
-                DetectedObject.Label label=object.getLabels().get(0);
-                d.label=label.getText().isEmpty()?"OBJECT":label.getText().toUpperCase(Locale.ROOT);
-                d.conf=label.getConfidence();
-            }
-            d.l=clamp(b.left/(float)width); d.t=clamp(b.top/(float)height); d.r=clamp(b.right/(float)width); d.b=clamp(b.bottom/(float)height);
+            d.label=category.categoryName().isEmpty()?"OBJECT":category.categoryName().toUpperCase(Locale.ROOT);
+            d.conf=category.score();
+            d.l=clamp(b.left/width);d.t=clamp(b.top/height);d.r=clamp(b.right/width);d.b=clamp(b.bottom/height);
             out.add(d);
         }
         sink.accept(out);
     }
 
     private static float clamp(float v){return Math.max(0f,Math.min(1f,v));}
-    @Override public void close(){if(provider!=null)provider.unbindAll();detector.close();executor.shutdownNow();}
+    @Override public void close(){if(provider!=null)provider.unbindAll();if(detector!=null)detector.close();executor.shutdownNow();}
 }
