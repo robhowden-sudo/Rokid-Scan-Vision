@@ -2,6 +2,8 @@ package com.rokid.scanvision.phone;
 
 import android.annotation.SuppressLint;
 import android.graphics.Rect;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.Image;
 import android.util.Size;
 
@@ -86,6 +88,18 @@ final class VisionController implements AutoCloseable {
                 .addOnSuccessListener(objects->publish(width,height,objects))
                 .addOnFailureListener(e->status.accept("VISION ERROR // "+e.getClass().getSimpleName()))
                 .addOnCompleteListener(task->{processing.set(false);proxy.close();});
+    }
+
+    void analyzeJpeg(byte[] jpeg,Runnable complete){
+        if(jpeg==null||jpeg.length==0){status.accept("GLASSES CAMERA // EMPTY IMAGE");complete.run();return;}
+        if(!processing.compareAndSet(false,true)){complete.run();return;}
+        Bitmap bitmap=BitmapFactory.decodeByteArray(jpeg,0,jpeg.length);
+        if(bitmap==null){processing.set(false);status.accept("GLASSES CAMERA // DECODE FAILED");complete.run();return;}
+        int width=bitmap.getWidth(),height=bitmap.getHeight();
+        detector.process(InputImage.fromBitmap(bitmap,0))
+                .addOnSuccessListener(objects->publish(width,height,objects))
+                .addOnFailureListener(e->status.accept("VISION ERROR // "+e.getClass().getSimpleName()))
+                .addOnCompleteListener(task->{bitmap.recycle();processing.set(false);complete.run();});
     }
 
     private void publish(int width,int height,List<DetectedObject> objects){

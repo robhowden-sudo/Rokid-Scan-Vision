@@ -19,6 +19,7 @@ import com.rokid.cxr.Caps;
 import com.rokid.cxr.link.CXRLink;
 import com.rokid.cxr.link.callbacks.ICXRLinkCbk;
 import com.rokid.cxr.link.callbacks.ICXRSessionCbk;
+import com.rokid.cxr.link.callbacks.IImageStreamCbk;
 import com.rokid.cxr.link.callbacks.ICustomCmdCbk;
 import com.rokid.cxr.link.callbacks.IGlassAppCbk;
 import com.rokid.cxr.link.utils.CxrDefs;
@@ -37,7 +38,7 @@ public class MainActivity extends ComponentActivity {
     private static final int REQ_AUTH=902;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private CXRLink link;
-    private volatile boolean connected=false,sessionReady=false,appStartRequested=false;
+    private volatile boolean connected=false,sessionReady=false,appStartRequested=false,glassesVisionRunning=false,glassesPhotoPending=false;
     private TextView status;
     private VisionController vision;
 
@@ -58,11 +59,16 @@ public class MainActivity extends ComponentActivity {
         PreviewView preview=new PreviewView(this); preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
         LinearLayout.LayoutParams previewParams=new LinearLayout.LayoutParams(-1,0,1f); previewParams.setMargins(0,24,0,24); root.addView(preview,previewParams);
         vision=new VisionController(this,preview,(width,height,detections)->worker.execute(()->sendDetections(width,height,detections)),this::setStatus);
-        Button camera=new Button(this); camera.setText("START LIVE VISION"); camera.setOnClickListener(v->{
+        Button glassesCamera=new Button(this); glassesCamera.setText("START GLASSES CAMERA VISION"); glassesCamera.setOnClickListener(v->{
+            glassesVisionRunning=!glassesVisionRunning;
+            glassesCamera.setText(glassesVisionRunning?"STOP GLASSES CAMERA VISION":"START GLASSES CAMERA VISION");
+            if(glassesVisionRunning) requestGlassesPhoto(); else setStatus("GLASSES VISION // STOPPED");
+        }); root.addView(glassesCamera,new LinearLayout.LayoutParams(-1,-2));
+        Button camera=new Button(this); camera.setText("PHONE CAMERA // DIAGNOSTIC MODE"); camera.setOnClickListener(v->{
             if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) vision.start();
             else requestPermissions(new String[]{Manifest.permission.CAMERA},903);
         }); root.addView(camera,new LinearLayout.LayoutParams(-1,-2));
-        TextView note=txt("START LIVE VISION runs on-device object detection from the phone camera. Detection boxes are normalized and streamed to the Rokid HUD when the glasses session is ready.",15,soft); note.setPadding(0,24,0,24); root.addView(note);
+        TextView note=txt("Normal mode requests images from the camera built into the Rokid glasses, processes them on this phone, then returns normalized detection boxes to the HUD. The phone camera remains available only for diagnostics.",15,soft); note.setPadding(0,24,0,24); root.addView(note);
         Button hi=new Button(this); hi.setText("OPEN HI ROKID"); hi.setOnClickListener(v->{Intent i=getPackageManager().getLaunchIntentForPackage("com.rokid.sprite.global.aiapp");if(i!=null)startActivity(i);else setStatus("HI ROKID APP NOT FOUND");});root.addView(hi,new LinearLayout.LayoutParams(-1,-2));
         return root;
     }
@@ -72,9 +78,7 @@ public class MainActivity extends ComponentActivity {
 
     private void requestPermissionsIfNeeded(){
         if(Build.VERSION.SDK_INT>=31 && (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)!=PackageManager.PERMISSION_GRANTED)) {
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.CAMERA},901);
-        } else if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.CAMERA},903);
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN},901);
         }
     }
 
@@ -109,6 +113,18 @@ public class MainActivity extends ComponentActivity {
 
     private void configureLink(){
         link.setCXRCustomCmdCbk(new ICustomCmdCbk(){@Override public void onCustomCmdResult(String c,byte[] d){}});
+        link.setCXRImageCbk(new IImageStreamCbk(){
+            @Override public void onImageReceived(byte[] data){
+                glassesPhotoPending=false;
+                if(!glassesVisionRunning)return;
+                vision.analyzeJpeg(data,MainActivity.this::requestNextGlassesPhoto);
+            }
+            @Override public void onImageError(int code,String message){
+                glassesPhotoPending=false;
+                setStatus("GLASSES CAMERA ERROR // "+code);
+                requestNextGlassesPhoto();
+            }
+        });
         link.setCXRLinkCbk(new ICXRLinkCbk(){
             @Override public void onCXRLConnected(boolean value){setStatus(value?"HI ROKID LINK // CONNECTED":"HI ROKID LINK // DISCONNECTED");}
             @Override public void onGlassBtConnected(boolean value){connected=value;if(value){setStatus("GLASSES // CONNECTED");link.getGlassDeviceInfo();}else{sessionReady=false;appStartRequested=false;setStatus("GLASSES // DISCONNECTED");}}
@@ -122,7 +138,7 @@ public class MainActivity extends ComponentActivity {
         CxrDefs.CXRSession session=new CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP,"com.rokid.scanvision.glasses");
         link.configCXRSession(session,new ICXRSessionCbk(){
             @Override public void onSessionAvailable(CxrDefs.CXRSessionReason reason){startGlassesApp();}
-            @Override public void onSessionStart(CxrDefs.CXRSessionReason reason){sessionReady=true;connected=true;setStatus("SCAN VISION // LINK READY");}
+            @Override public void onSessionStart(CxrDefs.CXRSessionReason reason){sessionReady=true;connected=true;setStatus("SCAN VISION // LINK READY");if(glassesVisionRunning)requestGlassesPhoto();}
             @Override public void onSessionPause(CxrDefs.CXRSessionReason reason){sessionReady=false;setStatus("SCAN VISION // SESSION PAUSED");}
             @Override public void onSessionUnavailable(CxrDefs.CXRSessionReason reason){sessionReady=false;appStartRequested=false;setStatus("SCAN VISION // SESSION UNAVAILABLE");}
         });
@@ -135,9 +151,24 @@ public class MainActivity extends ComponentActivity {
             @Override public void onUnInstallAppResult(boolean success){}
             @Override public void onStopAppResult(boolean success){}
             @Override public void onQueryAppResult(boolean installed){}
-            @Override public void onOpenAppResult(boolean success){appStartRequested=success;if(success){sessionReady=true;setStatus("GLASSES HUD // STARTED");}else setStatus("GLASSES HUD // LAUNCH FAILED");}
-            @Override public void onGlassAppResume(boolean resumed){if(resumed){sessionReady=true;setStatus("GLASSES HUD // RESUMED");}}
+            @Override public void onOpenAppResult(boolean success){appStartRequested=success;if(success){sessionReady=true;setStatus("GLASSES HUD // STARTED");if(glassesVisionRunning)requestGlassesPhoto();}else setStatus("GLASSES HUD // LAUNCH FAILED");}
+            @Override public void onGlassAppResume(boolean resumed){if(resumed){sessionReady=true;setStatus("GLASSES HUD // RESUMED");if(glassesVisionRunning)requestGlassesPhoto();}}
         });
+    }
+
+    private synchronized void requestGlassesPhoto(){
+        if(!glassesVisionRunning||glassesPhotoPending)return;
+        if(!sessionReady){setStatus("GLASSES CAMERA // WAITING FOR SESSION");return;}
+        try{
+            glassesPhotoPending=true;
+            boolean accepted=link.takePhoto(640,480,75);
+            if(!accepted){glassesPhotoPending=false;setStatus("GLASSES CAMERA // REQUEST REJECTED");requestNextGlassesPhoto();}
+            else setStatus("GLASSES CAMERA // SCANNING");
+        }catch(Throwable t){glassesPhotoPending=false;setStatus("GLASSES CAMERA // "+t.getClass().getSimpleName());requestNextGlassesPhoto();}
+    }
+
+    private void requestNextGlassesPhoto(){
+        if(status!=null)status.postDelayed(this::requestGlassesPhoto,180L);
     }
 
     private void sendTestPacket(){
@@ -165,6 +196,8 @@ public class MainActivity extends ComponentActivity {
 
     @Override protected void onDestroy(){
         if(vision!=null) vision.close();
+        glassesVisionRunning=false;
+        glassesPhotoPending=false;
         try{link.disconnect();}catch(Exception ignored){}
         worker.shutdownNow();
         super.onDestroy();
