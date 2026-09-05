@@ -21,7 +21,7 @@ jobs:
         run: gradle :phone:assembleDebug :glasses:assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: Rokid-Scan-Vision-v0.2-debug
+          name: Rokid-Scan-Vision-v0.2.1-debug
           path: |
             phone/build/outputs/apk/debug/*.apk
             glasses/build/outputs/apk/debug/*.apk

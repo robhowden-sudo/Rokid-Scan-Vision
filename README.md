@@ -2,7 +2,7 @@
 
 A green monochrome computer-vision HUD experiment for Rokid glasses, using the proven phone + glasses architecture from InTheSky-Rokid-Radar.
 
-## v0.2 goals
+## v0.2.1 goals
 
 - Dedicated Android phone and glasses modules
 - Rokid CXR messaging between phone and glasses
@@ -12,6 +12,7 @@ A green monochrome computer-vision HUD experiment for Rokid glasses, using the p
 - Compact JSON detection protocol
 - GitHub Actions debug APK builds
 - Rokid glasses-camera capture through CXR-L, with phone-camera diagnostic fallback
+- Explicit Hi Rokid `CAMERA` capability authorization
 - On-device ML Kit stream-mode object detection
 - Normalized detection packets streamed back to the glasses HUD
 

@@ -26,6 +26,7 @@ import com.rokid.cxr.link.utils.CxrDefs;
 import com.rokid.cxr.link.utils.GlassInfo;
 import com.rokid.sprite.aiapp.externalapp.auth.AuthResult;
 import com.rokid.sprite.aiapp.externalapp.auth.AuthorizationHelper;
+import com.rokid.sprite.aiapp.externalapp.auth.GlassPermission;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -52,7 +53,7 @@ public class MainActivity extends ComponentActivity {
         int green=Color.rgb(79,255,159),soft=Color.rgb(174,244,202);
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(36,60,36,36); root.setBackgroundColor(Color.BLACK);
         TextView title=txt("ROKID // SCAN VISION",26,green); title.setGravity(Gravity.CENTER); root.addView(title);
-        TextView version=txt("VISION HUD  v0.2",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
+        TextView version=txt("VISION HUD  v0.2.1",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
         status=txt("PHONE READY // GLASSES DISCONNECTED",16,green); status.setPadding(0,0,0,24); root.addView(status);
         Button connect=new Button(this); connect.setText("CONNECT THROUGH HI ROKID"); connect.setOnClickListener(v->authorize()); root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
         Button test=new Button(this); test.setText("SEND TEST TARGETS"); test.setOnClickListener(v->worker.execute(this::sendTestPacket)); root.addView(test,new LinearLayout.LayoutParams(-1,-2));
@@ -90,7 +91,8 @@ public class MainActivity extends ComponentActivity {
     private void authorize(){
         try {
             if(!AuthorizationHelper.INSTANCE.isRequiredHiRokidInstalled(this)){setStatus("COMPATIBLE HI ROKID APP REQUIRED");return;}
-            Pair<Integer,Intent> immediate=AuthorizationHelper.INSTANCE.requestAuthorization(this,REQ_AUTH);
+            GlassPermission[] permissions={GlassPermission.CAMERA};
+            Pair<Integer,Intent> immediate=AuthorizationHelper.INSTANCE.requestAuthorization(this,permissions,REQ_AUTH);
             setStatus("HI ROKID // AUTH REQUESTED");
             if(immediate!=null) handleAuthorization(immediate.first,immediate.second);
         }
@@ -105,7 +107,10 @@ public class MainActivity extends ComponentActivity {
     private void handleAuthorization(int resultCode,Intent data){
         try{
             AuthResult result=AuthorizationHelper.INSTANCE.parseAuthorizationResult(resultCode,data);
-            if(result instanceof AuthResult.AuthSuccess){setStatus("HI ROKID // AUTHORIZED");link.connect(((AuthResult.AuthSuccess)result).getToken());}
+            if(result instanceof AuthResult.AuthSuccess){
+                if(!AuthorizationHelper.INSTANCE.hasGlassPermission(GlassPermission.CAMERA)){setStatus("HI ROKID // CAMERA PERMISSION DENIED");return;}
+                setStatus("HI ROKID // CAMERA AUTHORIZED");link.connect(((AuthResult.AuthSuccess)result).getToken());
+            }
             else if(result instanceof AuthResult.AuthCancel)setStatus("HI ROKID // AUTH CANCELLED");
             else setStatus("HI ROKID // AUTH FAILED");
         }catch(Throwable t){setStatus("AUTH RESULT // ERROR");}
@@ -159,6 +164,11 @@ public class MainActivity extends ComponentActivity {
     private synchronized void requestGlassesPhoto(){
         if(!glassesVisionRunning||glassesPhotoPending)return;
         if(!sessionReady){setStatus("GLASSES CAMERA // WAITING FOR SESSION");return;}
+        if(!AuthorizationHelper.INSTANCE.hasGlassPermission(GlassPermission.CAMERA)){
+            glassesVisionRunning=false;
+            setStatus("GLASSES CAMERA PERMISSION MISSING // REAUTHORIZE");
+            return;
+        }
         try{
             glassesPhotoPending=true;
             boolean accepted=link.takePhoto(1024,768,80);
