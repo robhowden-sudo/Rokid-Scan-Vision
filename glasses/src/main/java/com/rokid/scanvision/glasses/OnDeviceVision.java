@@ -29,7 +29,9 @@ final class OnDeviceVision implements AutoCloseable {
     interface Sink { void accept(List<MainActivity.Detection> detections); }
     private static final long INFERENCE_INTERVAL_MS=250L;
     private static final float HUD_ASPECT_RATIO=480f/400f;
-    private static final float SCAN_WIDTH_FRACTION=.75f;
+    // The camera sees a much wider scene than the 23-degree optical HUD. Scan
+    // only the central portion so detections map to what the wearer can see.
+    private static final float SCAN_WIDTH_FRACTION=.30f;
     private final MainActivity activity;
     private final Sink sink;
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
