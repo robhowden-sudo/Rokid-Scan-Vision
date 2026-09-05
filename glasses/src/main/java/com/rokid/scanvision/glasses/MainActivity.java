@@ -109,7 +109,7 @@ public class MainActivity extends Activity {
             super.onDraw(c);
             float w=getWidth(),h=getHeight(),cx=w/2f,cy=h/2f;
             text.setTextSize(Math.max(14f,w*.035f)); text.setTextAlign(Paint.Align.LEFT);
-            c.drawText("SCAN.VISION // 0.1",16,30,text);
+            c.drawText("SCAN.VISION // 0.2",16,30,text);
             text.setTextAlign(Paint.Align.RIGHT); c.drawText(status,w-16,30,text);
 
             // central targeting reticle

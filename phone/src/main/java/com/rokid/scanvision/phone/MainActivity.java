@@ -1,16 +1,19 @@
 package com.rokid.scanvision.phone;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Pair;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+
+import androidx.activity.ComponentActivity;
+import androidx.camera.view.PreviewView;
 
 import com.rokid.cxr.Caps;
 import com.rokid.cxr.link.CXRLink;
@@ -26,33 +29,40 @@ import com.rokid.sprite.aiapp.externalapp.auth.AuthorizationHelper;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class MainActivity extends Activity {
+public class MainActivity extends ComponentActivity {
     private static final String CHANNEL="rokid_scan_vision_state";
     private static final int REQ_AUTH=902;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private CXRLink link;
-    private volatile boolean connected=false,sessionReady=false;
+    private volatile boolean connected=false,sessionReady=false,appStartRequested=false;
     private TextView status;
+    private VisionController vision;
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         getWindow().setStatusBarColor(Color.BLACK); getWindow().setNavigationBarColor(Color.BLACK);
-        link=new CXRLink(this); configureLink(); setContentView(buildUi()); requestBtPermissions();
+        link=new CXRLink(this); configureLink(); setContentView(buildUi()); requestPermissionsIfNeeded();
     }
 
     private LinearLayout buildUi(){
         int green=Color.rgb(79,255,159),soft=Color.rgb(174,244,202);
         LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setPadding(36,60,36,36); root.setBackgroundColor(Color.BLACK);
         TextView title=txt("ROKID // SCAN VISION",26,green); title.setGravity(Gravity.CENTER); root.addView(title);
-        TextView version=txt("VISION HUD  v0.1",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
+        TextView version=txt("VISION HUD  v0.2",14,soft); version.setGravity(Gravity.CENTER); version.setPadding(0,8,0,36); root.addView(version);
         status=txt("PHONE READY // GLASSES DISCONNECTED",16,green); status.setPadding(0,0,0,24); root.addView(status);
         Button connect=new Button(this); connect.setText("CONNECT THROUGH HI ROKID"); connect.setOnClickListener(v->authorize()); root.addView(connect,new LinearLayout.LayoutParams(-1,-2));
         Button test=new Button(this); test.setText("SEND TEST TARGETS"); test.setOnClickListener(v->worker.execute(this::sendTestPacket)); root.addView(test,new LinearLayout.LayoutParams(-1,-2));
-        TextView note=txt("v0.1 validates the Rokid link and green HUD first. SEND TEST TARGETS should place moving-style detection boxes on the glasses. Live camera vision comes next once this transport layer is proven on your hardware.",15,soft); note.setPadding(0,36,0,24); root.addView(note);
+        PreviewView preview=new PreviewView(this); preview.setImplementationMode(PreviewView.ImplementationMode.COMPATIBLE);
+        LinearLayout.LayoutParams previewParams=new LinearLayout.LayoutParams(-1,0,1f); previewParams.setMargins(0,24,0,24); root.addView(preview,previewParams);
+        vision=new VisionController(this,preview,(width,height,detections)->worker.execute(()->sendDetections(width,height,detections)),this::setStatus);
+        Button camera=new Button(this); camera.setText("START LIVE VISION"); camera.setOnClickListener(v->{
+            if(checkSelfPermission(Manifest.permission.CAMERA)==PackageManager.PERMISSION_GRANTED) vision.start();
+            else requestPermissions(new String[]{Manifest.permission.CAMERA},903);
+        }); root.addView(camera,new LinearLayout.LayoutParams(-1,-2));
+        TextView note=txt("START LIVE VISION runs on-device object detection from the phone camera. Detection boxes are normalized and streamed to the Rokid HUD when the glasses session is ready.",15,soft); note.setPadding(0,24,0,24); root.addView(note);
         Button hi=new Button(this); hi.setText("OPEN HI ROKID"); hi.setOnClickListener(v->{Intent i=getPackageManager().getLaunchIntentForPackage("com.rokid.sprite.global.aiapp");if(i!=null)startActivity(i);else setStatus("HI ROKID APP NOT FOUND");});root.addView(hi,new LinearLayout.LayoutParams(-1,-2));
         return root;
     }
@@ -60,40 +70,74 @@ public class MainActivity extends Activity {
     private TextView txt(String s,float sp,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(sp);t.setTextColor(color);return t;}
     private void setStatus(String s){runOnUiThread(()->status.setText(s));}
 
-    private void requestBtPermissions(){
-        if(Build.VERSION.SDK_INT>=31 && (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)!=PackageManager.PERMISSION_GRANTED))
-            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN},901);
+    private void requestPermissionsIfNeeded(){
+        if(Build.VERSION.SDK_INT>=31 && (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)!=PackageManager.PERMISSION_GRANTED)) {
+            requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN,Manifest.permission.CAMERA},901);
+        } else if(checkSelfPermission(Manifest.permission.CAMERA)!=PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA},903);
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(requestCode,permissions,results);
+        if(requestCode==903 && results.length>0 && results[0]==PackageManager.PERMISSION_GRANTED) vision.start();
     }
 
     private void authorize(){
-        try { AuthorizationHelper.getInstance().requestAuthorization(this,REQ_AUTH); setStatus("HI ROKID // AUTH REQUESTED"); }
+        try {
+            if(!AuthorizationHelper.INSTANCE.isRequiredHiRokidInstalled(this)){setStatus("COMPATIBLE HI ROKID APP REQUIRED");return;}
+            Pair<Integer,Intent> immediate=AuthorizationHelper.INSTANCE.requestAuthorization(this,REQ_AUTH);
+            setStatus("HI ROKID // AUTH REQUESTED");
+            if(immediate!=null) handleAuthorization(immediate.first,immediate.second);
+        }
         catch(Throwable t){ setStatus("HI ROKID AUTH // "+t.getClass().getSimpleName()); }
     }
 
     @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
         super.onActivityResult(requestCode,resultCode,data);
-        if(requestCode==REQ_AUTH){ try { AuthResult result=AuthorizationHelper.getInstance().parseAuthorizationResult(data); if(result!=null){setStatus("HI ROKID // AUTHORIZED");connectLink();}else setStatus("HI ROKID // AUTH FAILED"); } catch(Throwable t){setStatus("AUTH RESULT // ERROR");} }
+        if(requestCode==REQ_AUTH) handleAuthorization(resultCode,data);
+    }
+
+    private void handleAuthorization(int resultCode,Intent data){
+        try{
+            AuthResult result=AuthorizationHelper.INSTANCE.parseAuthorizationResult(resultCode,data);
+            if(result instanceof AuthResult.AuthSuccess){setStatus("HI ROKID // AUTHORIZED");link.connect(((AuthResult.AuthSuccess)result).getToken());}
+            else if(result instanceof AuthResult.AuthCancel)setStatus("HI ROKID // AUTH CANCELLED");
+            else setStatus("HI ROKID // AUTH FAILED");
+        }catch(Throwable t){setStatus("AUTH RESULT // ERROR");}
     }
 
     private void configureLink(){
         link.setCXRCustomCmdCbk(new ICustomCmdCbk(){@Override public void onCustomCmdResult(String c,byte[] d){}});
-        link.setCXRSessionCbk(new ICXRSessionCbk(){
-            @Override public void onSessionReady(){sessionReady=true;setStatus("SCAN VISION // LINK READY");}
-            @Override public void onSessionDisconnected(){sessionReady=false;setStatus("SCAN VISION // SESSION LOST");}
-        });
-        link.setCXRGlassAppCbk(new IGlassAppCbk(){
-            @Override public void onGlassAppStart(String p){setStatus("GLASSES HUD // STARTED");}
-            @Override public void onGlassAppStop(String p){setStatus("GLASSES HUD // STOPPED");}
-        });
         link.setCXRLinkCbk(new ICXRLinkCbk(){
-            @Override public void onConnect(GlassInfo info){connected=true;setStatus("GLASSES // CONNECTED");}
-            @Override public void onDisconnect(){connected=false;sessionReady=false;setStatus("GLASSES // DISCONNECTED");}
-            @Override public void onError(int code,String msg){setStatus("CXR ERROR // "+code);}
+            @Override public void onCXRLConnected(boolean value){setStatus(value?"HI ROKID LINK // CONNECTED":"HI ROKID LINK // DISCONNECTED");}
+            @Override public void onGlassBtConnected(boolean value){connected=value;if(value){setStatus("GLASSES // CONNECTED");link.getGlassDeviceInfo();}else{sessionReady=false;appStartRequested=false;setStatus("GLASSES // DISCONNECTED");}}
+            @Override public void onGlassDeviceInfo(GlassInfo info){}
+            @Override public void onGlassWearingStatus(boolean wearing){}
+            @Override public void onGlassAiAssistStart(){}
+            @Override public void onGlassAiAssistStop(){}
+            @Override public void onGlassAiInterrupt(boolean interrupted){}
+            @Override public void onGlassLauncherResume(){}
+        });
+        CxrDefs.CXRSession session=new CxrDefs.CXRSession(CxrDefs.CXRSessionType.CUSTOMAPP,"com.rokid.scanvision.glasses");
+        link.configCXRSession(session,new ICXRSessionCbk(){
+            @Override public void onSessionAvailable(CxrDefs.CXRSessionReason reason){startGlassesApp();}
+            @Override public void onSessionStart(CxrDefs.CXRSessionReason reason){sessionReady=true;connected=true;setStatus("SCAN VISION // LINK READY");}
+            @Override public void onSessionPause(CxrDefs.CXRSessionReason reason){sessionReady=false;setStatus("SCAN VISION // SESSION PAUSED");}
+            @Override public void onSessionUnavailable(CxrDefs.CXRSessionReason reason){sessionReady=false;appStartRequested=false;setStatus("SCAN VISION // SESSION UNAVAILABLE");}
         });
     }
 
-    private void connectLink(){
-        worker.execute(()->{try{link.connect();}catch(Throwable t){setStatus("CXR CONNECT // "+t.getClass().getSimpleName());}});
+    private void startGlassesApp(){
+        if(appStartRequested)return; appStartRequested=true;
+        link.appStart("com.rokid.scanvision.glasses.MainActivity",new IGlassAppCbk(){
+            @Override public void onInstallAppResult(boolean success){}
+            @Override public void onUnInstallAppResult(boolean success){}
+            @Override public void onStopAppResult(boolean success){}
+            @Override public void onQueryAppResult(boolean installed){}
+            @Override public void onOpenAppResult(boolean success){appStartRequested=success;if(success){sessionReady=true;setStatus("GLASSES HUD // STARTED");}else setStatus("GLASSES HUD // LAUNCH FAILED");}
+            @Override public void onGlassAppResume(boolean resumed){if(resumed){sessionReady=true;setStatus("GLASSES HUD // RESUMED");}}
+        });
     }
 
     private void sendTestPacket(){
@@ -105,9 +149,25 @@ public class MainActivity extends Activity {
             a.put(det("VEHICLE",.91,.57,.39,.92,.70));
             root.put("detections",a);
             Caps caps=new Caps();caps.write(root.toString());
-            link.sendMessage(CHANNEL,caps,root.toString().getBytes(StandardCharsets.UTF_8));
+            link.sendCustomCmd(CHANNEL,caps);
             setStatus("TEST TARGETS // SENT");
         }catch(Exception e){setStatus("SEND FAILED // "+e.getClass().getSimpleName());}
+    }
+
+    private void sendDetections(int width,int height,JSONArray detections){
+        if(!sessionReady) return;
+        try{
+            JSONObject root=new JSONObject(); root.put("type","scan_state"); root.put("frameWidth",width); root.put("frameHeight",height); root.put("detections",detections);
+            Caps caps=new Caps(); caps.write(root.toString());
+            link.sendCustomCmd(CHANNEL,caps);
+        }catch(Exception e){setStatus("VISION SEND // "+e.getClass().getSimpleName());}
+    }
+
+    @Override protected void onDestroy(){
+        if(vision!=null) vision.close();
+        try{link.disconnect();}catch(Exception ignored){}
+        worker.shutdownNow();
+        super.onDestroy();
     }
 
     private JSONObject det(String label,double confidence,double l,double t,double r,double b)throws Exception{
