@@ -32,6 +32,9 @@ final class OnDeviceVision implements AutoCloseable {
     // The camera sees a much wider scene than the 23-degree optical HUD. Scan
     // only the central portion so detections map to what the wearer can see.
     private static final float SCAN_WIDTH_FRACTION=.30f;
+    // The camera sits above the wearer's optical display axis. Moving the scan
+    // window down by a quarter of its height moves HUD markers up by about 25%.
+    private static final float SCAN_VERTICAL_OFFSET=.25f;
     private final MainActivity activity;
     private final Sink sink;
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
@@ -107,7 +110,9 @@ final class OnDeviceVision implements AutoCloseable {
         cropWidth=Math.min(cropWidth,sourceWidth);
         cropHeight=Math.min(cropHeight,sourceHeight);
         int left=(sourceWidth-cropWidth)/2;
-        int top=(sourceHeight-cropHeight)/2;
+        int centeredTop=(sourceHeight-cropHeight)/2;
+        int top=centeredTop+Math.round(cropHeight*SCAN_VERTICAL_OFFSET);
+        top=Math.max(0,Math.min(sourceHeight-cropHeight,top));
         return Bitmap.createBitmap(source,left,top,cropWidth,cropHeight);
     }
 
