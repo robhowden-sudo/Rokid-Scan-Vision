@@ -28,6 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class OnDeviceVision implements AutoCloseable {
     interface Sink { void accept(List<MainActivity.Detection> detections); }
     private static final long INFERENCE_INTERVAL_MS=250L;
+    private static final float HUD_ASPECT_RATIO=480f/400f;
+    private static final float SCAN_WIDTH_FRACTION=.75f;
     private final MainActivity activity;
     private final Sink sink;
     private final ExecutorService executor=Executors.newSingleThreadExecutor();
@@ -70,10 +72,13 @@ final class OnDeviceVision implements AutoCloseable {
                 Matrix matrix=new Matrix();matrix.postRotate(rotation);
                 bitmap=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),bitmap.getHeight(),matrix,true);
             }
-            MPImage image=new BitmapImageBuilder(bitmap).build();
+            Bitmap scanRegion=centerScanRegion(bitmap);
+            if(scanRegion!=bitmap)bitmap.recycle();
+            MPImage image=new BitmapImageBuilder(scanRegion).build();
             ObjectDetectorResult result=detector.detect(image);
             publish(result,image.getWidth(),image.getHeight());
             image.close();
+            scanRegion.recycle();
         }catch(RuntimeException e){activity.setVisionStatus("VISION // "+e.getClass().getSimpleName());}
         finally{proxy.close();processing.set(false);}
     }
@@ -87,6 +92,21 @@ final class OnDeviceVision implements AutoCloseable {
         ByteBuffer buffer=plane.getBuffer();buffer.rewind();padded.copyPixelsFromBuffer(buffer);
         if(paddedWidth==width)return padded;
         Bitmap cropped=Bitmap.createBitmap(padded,0,0,width,height);padded.recycle();return cropped;
+    }
+
+    private Bitmap centerScanRegion(Bitmap source){
+        int sourceWidth=source.getWidth(),sourceHeight=source.getHeight();
+        int cropWidth=Math.max(1,Math.round(sourceWidth*SCAN_WIDTH_FRACTION));
+        int cropHeight=Math.max(1,Math.round(cropWidth/HUD_ASPECT_RATIO));
+        if(cropHeight>sourceHeight){
+            cropHeight=sourceHeight;
+            cropWidth=Math.max(1,Math.round(cropHeight*HUD_ASPECT_RATIO));
+        }
+        cropWidth=Math.min(cropWidth,sourceWidth);
+        cropHeight=Math.min(cropHeight,sourceHeight);
+        int left=(sourceWidth-cropWidth)/2;
+        int top=(sourceHeight-cropHeight)/2;
+        return Bitmap.createBitmap(source,left,top,cropWidth,cropHeight);
     }
 
     private void publish(ObjectDetectorResult result,int width,int height){
