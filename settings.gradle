@@ -11,9 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://maven.rokid.com/repository/maven-public/' }
     }
 }
 
-rootProject.name = 'RokidScanVision'
-include ':phone', ':glasses'
+rootProject.name = "RokidScanVision"
+include ':glasses'
